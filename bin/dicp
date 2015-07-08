@@ -28,7 +28,7 @@ if __name__ == '__main__':
         sys.exit(1)
 
     # Load the problem.
-    prob = Problem.load(os.path.sep.join([indir, 'input.json']))
+    problem = Problem.load(os.path.sep.join([indir, 'input.json']))
 
     # Where to save the solution files.
     outdir = os.path.sep.join([indir, 'out', solver.slug()])
@@ -38,6 +38,6 @@ if __name__ == '__main__':
 
     # Time the model's outputs and save their solutions.
     start = datetime.now()
-    for i, schedule in enumerate(solver.solve(prob)):
-        solution = Solution(datetime.now() - start, schedule)
+    for i, schedule in enumerate(solver.solve(problem)):
+        solution = Solution(problem, schedule, datetime.now() - start)
         solution.save(os.path.sep.join([outdir, '%06d.json' % (i+1)]))
