@@ -1,20 +1,20 @@
 from collections import defaultdict
 
-class MostCommonHeuristic(object):
-    '''Heuristic that shares the most common command at any point'''
-    _slug = 'most-common'
+class MostTimeHeuristic(object):
+    '''Heuristic that shares the most time consuming command at any point'''
+    _slug = 'most-time'
 
     def slug(self):
-        return MostCommonHeuristic._slug
+        return MostTimeHeuristic._slug
 
     def solve(self, problem):
         # Keep track of what hasn't been assigned and how many of each thing there are.
         remaining = {i: set(problem.images[i]) for i in problem.images}
         order = defaultdict(list)
-        self._assign(remaining, order)
+        self._assign(problem, remaining, order)
         return [order]
 
-    def _assign(self, remaining, order):
+    def _assign(self, problem, remaining, order):
         if not remaining:
             return
 
@@ -24,16 +24,16 @@ class MostCommonHeuristic(object):
             for c in cmds:
                 by_cmd[c].add(i)
 
-        most_common = max(by_cmd, key=lambda p: len(by_cmd[p]))
+        most_time = max(by_cmd, key=lambda c: len(by_cmd[c]) * problem.commands[c])
 
         # Add this to the schedule for any it applies to.
         new_remain = {}
-        for i in by_cmd[most_common]:
-            order[i].append(most_common)
-            remaining[i].remove(most_common)
+        for i in by_cmd[most_time]:
+            order[i].append(most_time)
+            remaining[i].remove(most_time)
             if remaining[i]:
                 new_remain[i] = set(remaining[i])
             del remaining[i]
 
-        self._assign(new_remain, order)
-        self._assign(remaining, order)
+        self._assign(problem, new_remain, order)
+        self._assign(problem, remaining, order)
