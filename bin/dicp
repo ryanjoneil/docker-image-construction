@@ -1,0 +1,43 @@
+#!/usr/bin/env python
+
+# Solves DICP a instance using a given technique.
+
+import sys
+sys.path.append('.')
+
+from datetime import datetime
+from dicp import Problem, Solution
+from dicp.solvers import ALL_SOLVERS
+import os
+import shutil
+
+SOLVERS = {solverclass._slug: solverclass for solverclass in ALL_SOLVERS}
+
+if __name__ == '__main__':
+    try:
+        indir = sys.argv[1]
+        kwargs = dict(s.split('=') for s in sys.argv[3:])
+        solver = SOLVERS[sys.argv[2]](**kwargs)
+
+    except IndexError:
+        print 'usage: %s instance-dir solver [solver-args]' % sys.argv[0]
+        sys.exit(1)
+
+    except KeyError:
+        print 'invalid solver'
+        sys.exit(1)
+
+    # Load the problem.
+    prob = Problem.load(os.path.sep.join([indir, 'input.json']))
+
+    # Where to save the solution files.
+    outdir = os.path.sep.join([indir, 'out', solver.slug()])
+    if os.path.exists(outdir):
+        shutil.rmtree(outdir)
+    os.makedirs(outdir)
+
+    # Time the model's outputs and save their solutions.
+    start = datetime.now()
+    for i, schedule in enumerate(solver.solve(prob)):
+        solution = Solution(datetime.now() - start, schedule)
+        solution.save(os.path.sep.join([outdir, '%06d.json' % (i+1)]))

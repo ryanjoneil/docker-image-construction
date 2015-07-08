@@ -1,9 +1,11 @@
 from operator import itemgetter
+import json
 import random
 
 class Problem(object):
     @staticmethod
     def generate(num_images, num_cmds, max_time):
+        '''Generates a random instance of the DICP.'''
         img_fmt = '%%0%sd' % len(str(num_images))
         cmd_fmt = '%%0%sd' % len(str(num_cmds))
 
@@ -18,11 +20,18 @@ class Problem(object):
 
         return Problem(commands, images)
 
+    @staticmethod
+    def load(path):
+        '''Loads an instance of the DICP from a json file.'''
+        p = json.load(open(path))
+        return Problem(p['commands'], p['images'])
+
     def __init__(self, commands, images):
         self.commands = commands
         self.images = images
 
     def save(self, path):
+        '''Saves a DICP instance to a json file'''
         # json formatting doen't make it very human readable, so we do our own.
         with open(path, 'w') as fp:
             fp.write('{\n')
