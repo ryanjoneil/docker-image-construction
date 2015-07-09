@@ -1,3 +1,4 @@
+from collections import OrderedDict
 from operator import itemgetter
 import json
 import random
@@ -27,8 +28,8 @@ class Problem(object):
         return Problem(p['commands'], p['images'])
 
     def __init__(self, commands, images):
-        self.commands = commands
-        self.images = images
+        self.commands = OrderedDict(sorted(commands.items(), key=itemgetter(0)))
+        self.images = OrderedDict(sorted(images.items(), key=itemgetter(0)))
 
     def save(self, path):
         '''Saves a DICP instance to a json file'''
@@ -36,7 +37,7 @@ class Problem(object):
         with open(path, 'w') as fp:
             fp.write('{\n')
             fp.write('    "images": {\n')
-            for j, (i, v) in enumerate(sorted(self.images.items(), key=itemgetter(0))):
+            for j, (i, v) in enumerate(self.images.items()):
                 if j == len(self.images)-1:
                     end = '\n'
                 else:
@@ -45,7 +46,7 @@ class Problem(object):
             fp.write('    },\n')
 
             fp.write('    "commands": {\n')
-            for i, (c, v) in enumerate(sorted(self.commands.items(), key=itemgetter(0))):
+            for i, (c, v) in enumerate(self.commands.items()):
                 if i == len(self.commands)-1:
                     end = '\n'
                 else:
@@ -53,3 +54,34 @@ class Problem(object):
                 fp.write('        "%s": %d%s' % (c, v, end))
             fp.write('    }\n')
             fp.write('}\n')
+
+    @property
+    def stages(self):
+        '''Property mapping image names to a iterables of their stages.'''
+        try:
+            return self._stages
+        except AttributeError:
+            self._stages = {i: range(1, len(v)+1) for i, v in self.images.items()}
+            return self._stages
+
+    @property
+    def shared_stages(self):
+        '''Property mapping ordered image pairs to shared stages.'''
+        try:
+            return self._shared_stages
+        except AttributeError:
+            self._shared_stages = {k: range(1,len(v)+1) for k, v in self.shared_cmds.items()}
+            return self._shared_stages
+
+    @property
+    def shared_cmds(self):
+        '''Property mapping ordered image pairs to shared command sets.'''
+        try:
+            return self._shared_cmds
+        except AttributeError:
+            self._shared_cmds = {}
+            images = self.images.items()
+            for i, (img_i, cmds_i) in enumerate(images):
+                for img_j, cmds_j in images[i+1:]:
+                    self._shared_cmds[img_i,img_j] = set(cmds_i) & set(cmds_j)
+            return self._shared_cmds
