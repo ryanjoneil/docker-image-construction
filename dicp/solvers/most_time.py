@@ -7,12 +7,12 @@ class MostTimeHeuristic(object):
     def slug(self):
         return MostTimeHeuristic._slug
 
-    def solve(self, problem):
+    def solve(self, problem, saver):
         # Keep track of what hasn't been assigned and how many of each thing there are.
         remaining = {i: set(problem.images[i]) for i in problem.images}
         order = defaultdict(list)
         self._assign(problem, remaining, order)
-        return [order]
+        saver(order)
 
     def _assign(self, problem, remaining, order):
         if not remaining:

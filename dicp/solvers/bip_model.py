@@ -12,7 +12,7 @@ class BIPModel(object):
         # TODO: sos1 will not create a full schedule, only a shared schedule
         return BIPModel._slug
 
-    def solve(self, problem):
+    def solve(self, problem, saver):
         # TODO: time limits
 
         # Construct model.
@@ -51,9 +51,7 @@ class BIPModel(object):
                     model.addConstr(sum(y[ip,iq,s,c] for c in cmds) <= sum(y[ip,iq,s-1,c] for c in cmds))
 
         model.setObjective(sum(y.values()), GRB.MAXIMIZE)
-        model.optimize()
-
-        # TODO: callback to collect solutions along the way
+        model.optimize(lambda *args: self._callback(saver, *args))
 
         # Create optimal schedule
         schedule = defaultdict(list)
@@ -64,4 +62,19 @@ class BIPModel(object):
                         schedule[i].append(c)
                         break
 
-        return [schedule]
+        saver(schedule)
+
+    def _callback(self, saver, model, where):
+        # Save incumbent solutions as they are found.
+        if where != GRB.callback.MIPSOL:
+            return
+
+        schedule = defaultdict(list)
+        for i, stages in self.problem.stages.items():
+            for s in stages:
+                for c in self.problem.images[i]:
+                    if model.cbGetSolution(self.x[i,s,c]) > 0.5:
+                        schedule[i].append(c)
+                        break
+
+        saver(schedule)

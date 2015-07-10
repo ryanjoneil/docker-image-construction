@@ -36,8 +36,14 @@ if __name__ == '__main__':
         shutil.rmtree(outdir)
     os.makedirs(outdir)
 
-    # Time the model's outputs and save their solutions.
+    # Create a save function the solvers can use to write out incumbents.
     start = datetime.now()
-    for i, schedule in enumerate(solver.solve(problem)):
+    solution_num = 1
+
+    def saver(schedule):
+        global solution_num
         solution = Solution(problem, schedule, datetime.now() - start)
-        solution.save(os.path.sep.join([outdir, '%06d.json' % (i+1)]))
+        solution.save(os.path.sep.join([outdir, '%06d.json' % solution_num]))
+        solution_num += 1
+
+    solver.solve(problem, saver)
