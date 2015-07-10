@@ -1,3 +1,4 @@
+from .most_common import MostCommonHeuristic
 from collections import defaultdict
 from itertools import product
 from gurobipy import GRB, Model, quicksum as sum
@@ -34,6 +35,18 @@ class BIPModel(object):
 
         model.update()
 
+        # Use heuristic for initial feasible solution.
+        soln = []
+        def save_initial(schedule):
+            soln.append(schedule)
+        MostCommonHeuristic().solve(problem, save_initial)
+        init = soln.pop()
+
+        # Inform the master model of this solution.
+        for i,s,c in x:
+            if init[i][s-1] == c:
+                x[i,s,c].start = 1
+
         # Each image one command per stage, and each command once.
         for i in problem.images:
             for s in problem.stages[i]:
@@ -41,7 +54,7 @@ class BIPModel(object):
             for c in problem.images[i]:
                 model.addConstr(sum(x[i,s,c] for s in problem.stages[i]) == 1)
 
-        # Find shared paths among user pairs.
+        # Find shared paths among image pairs.
         for (ip, iq), cmds in problem.shared_cmds.items():
             for s in problem.shared_stages[ip,iq]:
                 for c in cmds:
@@ -50,7 +63,10 @@ class BIPModel(object):
                 if s > 1:
                     model.addConstr(sum(y[ip,iq,s,c] for c in cmds) <= sum(y[ip,iq,s-1,c] for c in cmds))
 
-        model.setObjective(sum(y.values()), GRB.MAXIMIZE)
+        model.setObjective(
+            sum(problem.commands[c] * y[ip,iq,s,c] for ip,iq,s,c in y),
+            GRB.MAXIMIZE
+        )
         model.optimize(lambda *args: self._callback(saver, *args))
 
         # Create optimal schedule
