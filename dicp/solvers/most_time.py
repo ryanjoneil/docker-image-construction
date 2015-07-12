@@ -24,7 +24,7 @@ class MostTimeHeuristic(object):
             for c in cmds:
                 by_cmd[c].add(i)
 
-        most_time = max(by_cmd, key=lambda c: len(by_cmd[c]) * problem.commands[c])
+        most_time = max(by_cmd, key=lambda c: sum(problem.commands[c] for _ in range(1, len(by_cmd[c]))))
 
         # Add this to the schedule for any it applies to.
         new_remain = {}
