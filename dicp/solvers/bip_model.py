@@ -43,9 +43,17 @@ class BIPModel(object):
 
         model.update()
 
+        # TODO: need to remove presolved commands so the heuristic doesn't try them.
+
         # Add a heuristic initial solution.
         if self.heur is not None:
             self._heur()
+
+        # Presolving
+        if self.presol in ('all', 'unshared'):
+            self._presol_unshared()
+        if self.presol in ('all', 'shared'):
+            self._presol_shared()
 
         # Each image one command per stage, and each command once.
         for i in problem.images:
@@ -80,6 +88,21 @@ class BIPModel(object):
 
         saver(schedule)
 
+    def _callback(self, saver, model, where):
+        # Save incumbent solutions as they are found.
+        if where != GRB.callback.MIPSOL:
+            return
+
+        schedule = defaultdict(list)
+        for i, stages in self.problem.stages.items():
+            for s in stages:
+                for c in self.problem.images[i]:
+                    if model.cbGetSolution(self.x[i,s,c]) > 0.5:
+                        schedule[i].append(c)
+                        break
+
+        saver(schedule)
+
     def _heur(self):
         # Find the heuristic we're supported to use.
         heur = None
@@ -99,17 +122,22 @@ class BIPModel(object):
             if init[i][s-1] == c:
                 self.x[i,s,c].start = 1
 
-    def _callback(self, saver, model, where):
-        # Save incumbent solutions as they are found.
-        if where != GRB.callback.MIPSOL:
-            return
+    def _presol_unshared(self):
+        # Find every command that no other image has. Fix them at the end.
+        for img, cmds in self.problem.images.items():
+            cmds = set(cmds)
 
-        schedule = defaultdict(list)
-        for i, stages in self.problem.stages.items():
-            for s in stages:
-                for c in self.problem.images[i]:
-                    if model.cbGetSolution(self.x[i,s,c]) > 0.5:
-                        schedule[i].append(c)
-                        break
+            for img2, cmds2 in self.problem.images.items():
+                if img2 == img:
+                    continue
+                cmds = cmds - set(cmds2)
 
-        saver(schedule)
+                if not cmds:
+                    break
+
+            for s, c in zip(reversed(self.problem.stages[img]), cmds):
+                print 'presol: x[%s,%s,%s] = 1' % (img,s,c)
+                self.x[img,s,c].lb = 1
+
+    def _presol_shared(self):
+        pass
