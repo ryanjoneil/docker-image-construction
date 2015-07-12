@@ -7,6 +7,7 @@ sys.path.append('.')
 
 from datetime import datetime
 from dicp import Problem, Solution
+from collections import OrderedDict
 from dicp.solvers import ALL_SOLVERS
 import os
 import shutil
@@ -16,7 +17,17 @@ SOLVERS = {solverclass._slug: solverclass for solverclass in ALL_SOLVERS}
 if __name__ == '__main__':
     try:
         indir = sys.argv[1]
-        kwargs = dict(s.split('=') for s in sys.argv[3:])
+
+        # Anything after the solver slug is a kwarg.
+        kwargs = OrderedDict()
+        for s in sys.argv[3:]:
+            comps = s.split('=')
+            if len(comps) == 2:
+                kwargs[comps[0]] = comps[1]
+            else:
+                kwargs[s] = True
+
+        # Try and instantiate the solver.
         solver = SOLVERS[sys.argv[2]](**kwargs)
 
     except IndexError:

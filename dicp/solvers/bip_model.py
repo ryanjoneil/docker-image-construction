@@ -7,18 +7,25 @@ class BIPModel(object):
     '''Reference binary integer program: full model with no decomposition'''
     _slug = 'bip-model'
 
+    def __init__(self, presol=None, heur=None, time=None):
+        self.presol = presol
+        self.heur = heur
+        self.time = time # in minutes
+
     def slug(self):
-        # TODO: presol, presol+sos1, linear 2nd stage, heuristic initial sol'n
-        # TODO: benders, benders+sos1+presol, +heuristic initial sol'n
-        # TODO: sos1 will not create a full schedule, only a shared schedule
-        return BIPModel._slug
+        slug = BIPModel._slug
+        if self.presol is not None:
+            slug = '%s-presol-%s' % (slug, self.presol)
+        if self.heur is not None:
+            slug = '%s-heur-%s' % (slug, self.heur)
+        return slug
 
     def solve(self, problem, saver):
-        # TODO: time limits
-
-        # Construct model.
+        # Construct model
         self.problem = problem
         self.model = model = Model()
+        if self.time is not None:
+            model.params.TimeLimit = 60 * int(self.time)
 
         # x[i,s,c] = 1 if image i runs command c during stage s, 0 otherwise
         self.x = x = {}
