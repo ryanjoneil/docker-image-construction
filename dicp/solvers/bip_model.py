@@ -1,4 +1,5 @@
 from .most_common import MostCommonHeuristic
+from .most_time import MostTimeHeuristic
 from collections import defaultdict
 from itertools import product
 from gurobipy import GRB, Model, quicksum as sum
@@ -21,20 +22,20 @@ class BIPModel(object):
         return slug
 
     def solve(self, problem, saver):
-        # Construct model
+        # Construct model.
         self.problem = problem
         self.model = model = Model()
         if self.time is not None:
             model.params.TimeLimit = 60 * int(self.time)
 
-        # x[i,s,c] = 1 if image i runs command c during stage s, 0 otherwise
+        # x[i,s,c] = 1 if image i runs command c during stage s, 0 otherwise.
         self.x = x = {}
         for i, cmds in problem.images.items():
             for s, c in product(problem.stages[i], cmds):
                 x[i,s,c] = model.addVar(vtype=GRB.BINARY, name='x[%s,%s,%s]' % (i,s,c))
 
         # y[ip,iq,s,c] = 1 if images ip & iq have a shared path through stage
-        #                s by running command c during s, 0 otherwise
+        #                s by running command c during s, 0 otherwise.
         y = {}
         for (ip, iq), cmds in problem.shared_cmds.items():
             for s, c in product(problem.shared_stages[ip, iq], cmds):
@@ -42,17 +43,9 @@ class BIPModel(object):
 
         model.update()
 
-        # Use heuristic for initial feasible solution.
-        soln = []
-        def save_initial(schedule):
-            soln.append(schedule)
-        MostCommonHeuristic().solve(problem, save_initial)
-        init = soln.pop()
-
-        # Inform the master model of this solution.
-        for i,s,c in x:
-            if init[i][s-1] == c:
-                x[i,s,c].start = 1
+        # Add a heuristic initial solution.
+        if self.heur is not None:
+            self._heur()
 
         # Each image one command per stage, and each command once.
         for i in problem.images:
@@ -76,7 +69,7 @@ class BIPModel(object):
         )
         model.optimize(lambda *args: self._callback(saver, *args))
 
-        # Create optimal schedule
+        # Create optimal schedule.
         schedule = defaultdict(list)
         for i, stages in problem.stages.items():
             for s in stages:
@@ -86,6 +79,25 @@ class BIPModel(object):
                         break
 
         saver(schedule)
+
+    def _heur(self):
+        # Find the heuristic we're supported to use.
+        heur = None
+        for h in (MostCommonHeuristic, MostTimeHeuristic):
+            if self.heur == h._slug:
+                heur = h()
+
+        # Use heuristic for initial feasible solution.
+        soln = []
+        def save_initial(schedule):
+            soln.append(schedule)
+        heur.solve(self.problem, save_initial)
+        init = soln.pop()
+
+        # Inform the BIP model of this solution.
+        for i,s,c in self.x:
+            if init[i][s-1] == c:
+                self.x[i,s,c].start = 1
 
     def _callback(self, saver, model, where):
         # Save incumbent solutions as they are found.
