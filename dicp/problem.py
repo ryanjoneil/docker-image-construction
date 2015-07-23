@@ -1,6 +1,8 @@
 from collections import OrderedDict
 from operator import itemgetter
 import json
+import math
+import numpy as np
 import random
 
 class Problem(object):
@@ -11,12 +13,15 @@ class Problem(object):
         cmd_fmt = '%%0%sd' % len(str(num_cmds))
 
         # Each command has an expected amount of time it will take to execute.
-        commands = {cmd_fmt % c: random.randint(1, max_time) for c in range(1, num_cmds+1)}
+        commands = {
+            cmd_fmt % c: int(math.ceil(np.random.exponential(max_time)))
+            for c in range(1, num_cmds+1)
+        }
 
         # Each image is comprised of the commands required to construct it.
         images = {}
         for i in range(1, num_images+1):
-            size = random.randint(1, num_cmds)
+            size = np.random.poisson(num_cmds/4)
             images[img_fmt % i] = list(sorted(random.sample(commands, size)))
 
         return Problem(commands, images)
