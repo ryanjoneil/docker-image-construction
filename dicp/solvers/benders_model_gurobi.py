@@ -4,13 +4,13 @@ from itertools import product
 from gurobipy import GRB, Model, quicksum as sum
 import sys
 
-class BendersModel(object):
-    '''Benders Decomposition of the original BIP'''
-    _slug = 'benders-model'
+class BendersModelGurobi(object):
+    '''Benders Decomposition of the original BIP using Gurobi'''
+    _slug = 'benders-model-gurobi'
 
     def slug(self):
         # TODO: presol, presol+sos1, heuristic initial sol'n
-        return BendersModel._slug
+        return BendersModelGurobi._slug
 
     def solve(self, problem, saver):
         # TODO: time limits

@@ -4,9 +4,9 @@ from collections import defaultdict
 from itertools import product
 from gurobipy import GRB, Model, quicksum as sum
 
-class BIPModel(object):
+class BIPModelGurobi(object):
     '''Reference binary integer program: full model with no decomposition'''
-    _slug = 'bip-model'
+    _slug = 'bip-model-gurobi'
 
     def __init__(self, presol=None, heur=None, time=None):
         self.presol = presol
@@ -14,7 +14,7 @@ class BIPModel(object):
         self.time = time # in minutes
 
     def slug(self):
-        slug = BIPModel._slug
+        slug = BIPModelGurobi._slug
         if self.presol is not None:
             slug = '%s-presol-%s' % (slug, self.presol)
         if self.heur is not None:
