@@ -61,6 +61,15 @@ class Problem(object):
             fp.write('}\n')
 
     @property
+    def all_stages(self):
+        '''Property providing all stages in the problem.'''
+        try:
+            return self._all_stages
+        except AttributeError:
+            self._all_stages = range(1, len(self.commands)+1)
+            return self._all_stages
+
+    @property
     def stages(self):
         '''Property mapping image names to a iterables of their stages.'''
         try:

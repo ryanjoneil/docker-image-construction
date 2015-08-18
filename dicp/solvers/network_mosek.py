@@ -24,6 +24,30 @@ class NetworkMosek(object):
         if self.time is not None:
             model.setSolverParam('mioMaxTime', 60.0  * int(self.time))
 
+        # x[1,c] = 1 if the master schedule has (null, c) in its first stage
+        # x[s,c1,c2] = 1 if the master schedule has (c1, c2) in stage s > 1
+        x = {}
+        for s in problem.all_stages:
+            if s == 1:
+                # First arc in the individual image path.
+                for c in problem.commands:
+                    x[1,c] = model.variable(
+                        'x[1,%s]' % c, 1,
+                        Domain.inRange(0.0, 1.0),
+                        Domain.isInteger()
+                    )
+
+            else:
+                # Other arcs.
+                for c1, c2 in product(problem.commands, problem.commands):
+                    if c1 == c2:
+                        continue
+                    x[s,c1,c2] = model.variable(
+                        'x[%s,%s,%s]' % (s,c1,c2), 1,
+                        Domain.inRange(0.0, 1.0),
+                        Domain.isInteger()
+                    )
+
         # y[i,1,c] = 1 if image i starts by going to c
         # y[i,s,c1,c2] = 1 if image i goes from command c1 to c2 in stage s > 1
         y = {}
@@ -37,6 +61,10 @@ class NetworkMosek(object):
                             Domain.inRange(0.0, 1.0),
                             Domain.isInteger()
                         )
+                        model.constraint('x_y[i%s,1,c%s]' % (i,c),
+                            Expr.sub(x[1,c], y[i,1,c]),
+                            Domain.greaterThan(0.0)
+                        )
 
                 else:
                     # Other arcs.
@@ -48,7 +76,10 @@ class NetworkMosek(object):
                             Domain.inRange(0.0, 1.0),
                             Domain.isInteger()
                         )
-
+                        model.constraint('x_y[i%s,s%s,c%s,c%s]' % (i,s,c1,c2),
+                            Expr.sub(x[s,c1,c2], y[i,s,c1,c2]),
+                            Domain.greaterThan(0.0)
+                        )
 
             for c in cmds:
                 # Each command is an arc destination exactly once.
@@ -79,12 +110,7 @@ class NetworkMosek(object):
                     )
 
 
-
-        # if y:
-        #     obj = Expr.add(y.values())
-        # else:
-        #     obj = 0.0
-        model.objective('z', ObjectiveSense.Maximize, 0.0)
+        model.objective('z', ObjectiveSense.Minimize, Expr.add(x.values()))
         model.setLogHandler(sys.stdout)
         model.acceptedSolutionStatus(AccSolutionStatus.Feasible)
         model.solve()
