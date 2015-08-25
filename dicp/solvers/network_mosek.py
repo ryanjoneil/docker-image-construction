@@ -48,6 +48,39 @@ class NetworkMosek(object):
                         Domain.isInteger()
                     )
 
+        smax = max(problem.all_stages)
+        obj = [0.0]
+
+        # TODO: deal with images that do not have the same number of commands.
+        # t[s,c] is the total time incurred at command c in stage s
+        t = {}
+        for s in problem.all_stages:
+            for c in problem.commands:
+                t[s,c] = model.variable(
+                    't[%s,%s]' % (c,s), 1,
+                    Domain.greaterThan(0.0)
+                )
+                if s == 1:
+                    model.constraint('t[1,%s]' % c,
+                        Expr.sub(t[1,c], Expr.mul(float(problem.commands[c]), x[1,c])),
+                        Domain.greaterThan(0.0)
+                    )
+                else:
+                    rhs = [0.0]
+                    for c1, coeff in problem.commands.items():
+                        if c1 == c:
+                            continue
+                        else:
+                            rhs = Expr.add(rhs, Expr.mulElm(t[s-1,c1], x[s,c1,c]))
+                    model.constraint('t[%s,%s]' % (s,c),
+                        Expr.sub(t[1,c], rhs),
+                        Domain.greaterThan(0.0)
+                    )
+
+                    # Objective function = sum of aggregate  comand times
+                    if s == smax:
+                        obj = Expr.add(obj, t[s,c])
+
         # y[i,1,c] = 1 if image i starts by going to c
         # y[i,s,c1,c2] = 1 if image i goes from command c1 to c2 in stage s > 1
         y = {}
@@ -111,10 +144,10 @@ class NetworkMosek(object):
 
 
         model.objective('z', ObjectiveSense.Minimize, Expr.add(x.values()))
+#        model.objective('z', ObjectiveSense.Minimize, obj)
         model.setLogHandler(sys.stdout)
         model.acceptedSolutionStatus(AccSolutionStatus.Feasible)
         model.solve()
-
 
         # Create optimal schedule.
         schedule = defaultdict(list)
