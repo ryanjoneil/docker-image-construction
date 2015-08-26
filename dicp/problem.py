@@ -1,7 +1,10 @@
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
+from itertools import combinations
+from networkx.algorithms import find_cliques
 from operator import itemgetter
 import json
 import math
+import networkx as nx
 import numpy as np
 import random
 
@@ -99,3 +102,76 @@ class Problem(object):
                 for img_j, cmds_j in images[i+1:]:
                     self._shared_cmds[img_i,img_j] = set(cmds_i) & set(cmds_j)
             return self._shared_cmds
+
+    def cliques(self):
+        '''Returns all maximal cliques with 2+ images & their intersections'''
+        return self._cliques(self.images)
+
+    def _cliques(self, images, prefix='x'):
+        # TODO: make this a heckuva lot faster.
+        g = nx.Graph()
+
+        # All commands that are used in these images.
+        commands = set()
+        for cmds in images.values():
+            commands.update(cmds)
+
+        # Add nodes for all images and connect them.
+        for i1, i2 in combinations(images, 2):
+            g.add_edge('image-%s' % i1, 'image-%s' % i2)
+
+        # Add nodes for all commands and connect them.
+        for c1, c2 in combinations(commands, 2):
+            g.add_edge('cmd-%s' % c1, 'cmd-%s' % c2)
+
+        # Connect images and commands that are related.
+        for i, cmds in images.items():
+            for c in cmds:
+                g.add_edge('image-%s' % i, 'cmd-%s' % c)
+
+        # Find all maximal cliques. Filter out those with < 2 images.
+        # Fix the image and command names.
+        cliques = []
+        num = 1
+        for c in find_cliques(g):
+            imgs = set([x.replace('image-','') for x in c if x.startswith('image-')])
+            cmds = set([x.replace('cmd-','') for x in c if x.startswith('cmd-')])
+            if len(imgs) > 1 and cmds:
+                num_pairs = sum(range(1, len(images)+1))
+                total_time = sum(self.commands[c] for c in cmds)
+
+                name = '%s%d' % (prefix, num)
+
+                # Find all the child cliques of this clique.
+                children = []
+                if len(imgs) > 2:
+                    new_images = {}
+                    for img in imgs:
+                        new_cmds = set(images[img]) - cmds
+                        if new_cmds:
+                            new_images[img] = new_cmds
+                    if len(new_images) > 1:
+                        children.append(self._cliques(new_images, prefix='%s_' % name))
+
+                cliques.append({
+                    'name':      '%s%d' % (prefix, num),
+                    'cache_use': num_pairs * total_time,
+                    'images':    imgs,
+                    'commands':  cmds,
+                    'children':  children
+                })
+
+                num += 1
+
+        # Find intersections among them.
+        by_cmd = defaultdict(set)
+        for cl in cliques:
+            for c in cl['commands']:
+                by_cmd[c].add(cl['name'])
+
+        intersections = set()
+        for x in by_cmd.values():
+            if len(x) > 1:
+                intersections.add(tuple(sorted(x)))
+
+        return {'cliques': cliques, 'intersections': intersections}

@@ -3,7 +3,6 @@ include "all_different.mzn";
 int: nstages = 4;
 int: ncommands = 4;
 
-set of int: images = 1..3;
 set of int: stages = 1..nstages;
 set of int: commands = 1..ncommands;
 
