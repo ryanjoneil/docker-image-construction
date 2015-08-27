@@ -137,7 +137,7 @@ class Problem(object):
             imgs = set([x.replace('image-','') for x in c if x.startswith('image-')])
             cmds = set([x.replace('cmd-','') for x in c if x.startswith('cmd-')])
             if len(imgs) > 1 and cmds:
-                num_pairs = sum(range(1, len(images)+1))
+                num_pairs = sum(range(1, len(images)))
                 total_time = sum(self.commands[c] for c in cmds)
 
                 name = '%s%d' % (prefix, num)
@@ -150,6 +150,7 @@ class Problem(object):
                         new_cmds = set(images[img]) - cmds
                         if new_cmds:
                             new_images[img] = new_cmds
+
                     if len(new_images) > 1:
                         children.append(self._cliques(new_images, prefix='%s_' % name))
 
