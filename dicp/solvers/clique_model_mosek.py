@@ -19,7 +19,8 @@ class CliqueModelMosek(object):
 
         # Do recursive maximal clique detection.
         self.clique_data = clique_data = problem.cliques()
-
+        import pprint
+        pprint.pprint(clique_data)
         self.model = model = Model()
         if self.time is not None:
             model.setSolverParam('mioMaxTime', 60.0  * int(self.time))
@@ -43,6 +44,8 @@ class CliqueModelMosek(object):
         for img, cmds in schedule.items():
             remain = set(problem.images[img]) - set(cmds)
             schedule[img].extend(remain)
+        for img in set(problem.images) - set(schedule):
+            schedule[img] = list(problem.images[img])
 
         saver(schedule)
 
@@ -80,5 +83,3 @@ class CliqueModelMosek(object):
                     schedule[img].append(cmd)
                 for child in c['children']:
                    self._translate(schedule, c['children'])
-
-

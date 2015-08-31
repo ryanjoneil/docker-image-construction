@@ -165,13 +165,13 @@ class Problem(object):
                 num += 1
 
         # Find intersections among them.
-        by_cmd = defaultdict(set)
+        by_img = defaultdict(set)
         for cl in cliques:
-            for c in cl['commands']:
-                by_cmd[c].add(cl['name'])
+            for c in cl['images']:
+                by_img[c].add(cl['name'])
 
         intersections = set()
-        for x in by_cmd.values():
+        for x in by_img.values():
             if len(x) > 1:
                 intersections.add(tuple(sorted(x)))
 
