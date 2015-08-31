@@ -107,7 +107,7 @@ class Problem(object):
         '''Returns all maximal cliques with 2+ images & their intersections'''
         return self._cliques(self.images)
 
-    def _cliques(self, images, prefix='x'):
+    def _cliques(self, images, prefix='c'):
         # TODO: make this a heckuva lot faster.
         g = nx.Graph()
 
@@ -137,7 +137,6 @@ class Problem(object):
             imgs = set([x.replace('image-','') for x in c if x.startswith('image-')])
             cmds = set([x.replace('cmd-','') for x in c if x.startswith('cmd-')])
             if len(imgs) > 1 and cmds:
-                num_pairs = sum(range(1, len(images)))
                 total_time = sum(self.commands[c] for c in cmds)
 
                 name = '%s%d' % (prefix, num)
@@ -155,11 +154,11 @@ class Problem(object):
                         children.append(self._cliques(new_images, prefix='%s_' % name))
 
                 cliques.append({
-                    'name':      '%s%d' % (prefix, num),
-                    'cache_use': num_pairs * total_time,
-                    'images':    imgs,
-                    'commands':  cmds,
-                    'children':  children
+                    'name':     '%s%d' % (prefix, num),
+                    'time':     total_time,
+                    'images':   imgs,
+                    'commands': cmds,
+                    'children': children
                 })
 
                 num += 1
