@@ -1,3 +1,5 @@
+from collections import defaultdict
+from itertools import product
 from mosek.fusion import Model, Domain, Expr, ObjectiveSense, AccSolutionStatus
 import sys
 
@@ -33,6 +35,17 @@ class CliqueModelMosek(object):
         model.acceptedSolutionStatus(AccSolutionStatus.Feasible)
         model.solve()
 
+        # Translate the output of this to a schedule.
+        schedule = defaultdict(list)
+        self._translate(schedule, clique_data)
+
+        # Add anything that remains, post clique model.
+        for img, cmds in schedule.items():
+            remain = set(problem.images[img]) - set(cmds)
+            schedule[img].extend(remain)
+
+        saver(schedule)
+
     def _update(self, clique_data, parent=None):
         for c in clique_data['cliques']:
             self.x[c['name']] = v = self.model.variable(
@@ -59,4 +72,13 @@ class CliqueModelMosek(object):
                 Domain.lessThan(1.0)
             )
             self._inter += 1
+
+    def _translate(self, schedule, data):
+        for c in data['cliques']:
+            if self.x[c['name']].level()[0] > 0.5:
+                for img, cmd in product(c['images'], c['commands']):
+                    schedule[img].append(cmd)
+                for child in c['children']:
+                   self._translate(schedule, c['children'])
+
 
