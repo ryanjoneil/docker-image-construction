@@ -7,7 +7,7 @@ class CliqueModelMosek(object):
     '''Transformed set packing model over maximal cliques'''
     _slug = 'clique-model-mosek'
 
-    def __init__(self, presol=None, heur=None, time=None):
+    def __init__(self, time=None):
         self.time = time # in minutes
 
     def slug(self):
