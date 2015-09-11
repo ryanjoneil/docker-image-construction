@@ -40,10 +40,17 @@ x_3_b = m.variable('x_3_b', *binary)
 x_3_c = m.variable('x_3_c', *binary)
 x_3_d = m.variable('x_3_d', *binary)
 
+# Provide a variable for each maximal clique and maximal sub-clique.
+x_12_ab = m.variable('x_12_ab', *binary)
+
+x_123_b = m.variable('x_123_b', *binary)
+x_123_b_12_a = m.variable('x_123_b_12_a', *binary)
+x_123_b_23_cd = m.variable('x_123_b_23_cd', *binary)
+
 # Each command must be run once for each image.
-m.constraint('c_1_a', Expr.add([x_1_a), Domain.equalsTo(1.0))
-m.constraint('c_1_b', Expr.add([x_1_b), Domain.equalsTo(1.0))
-m.constraint('c_2_a', Expr.add([x_2_a), Domain.equalsTo(1.0))
+m.constraint('c_1_a', Expr.add([x_1_a, x_12_ab, x_123_b_12_a]), Domain.equalsTo(1.0))
+m.constraint('c_1_b', Expr.add([x_1_b, x_12_ab, x_123_b]), Domain.equalsTo(1.0))
+m.constraint('c_2_a', Expr.add([x_2_a, x_12_ab, x_123_b_12_a]), Domain.equalsTo(1.0))
 m.constraint('c_2_b', Expr.add([x_2_b, x_12_ab, x_123_b]), Domain.equalsTo(1.0))
 m.constraint('c_2_c', Expr.add([x_2_c, x_123_b_23_cd]), Domain.equalsTo(1.0))
 m.constraint('c_2_d', Expr.add([x_2_d, x_123_b_23_cd]), Domain.equalsTo(1.0))
@@ -101,4 +108,3 @@ print '\tx_123_b = %.0f' % x_123_b.level()[0]
 print '\tx_123_b_12_a  = %.0f' % x_123_b_12_a.level()[0]
 print '\tx_123_b_23_cd = %.0f' % x_123_b_23_cd.level()[0]
 print
-
