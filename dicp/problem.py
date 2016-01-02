@@ -1,6 +1,6 @@
 from collections import OrderedDict, defaultdict
 from itertools import combinations
-from networkx.algorithms import find_cliques
+from igraph import Graph
 from operator import itemgetter
 import json
 import math
@@ -108,34 +108,58 @@ class Problem(object):
         return self._cliques(self.images)
 
     def _cliques(self, images, prefix='c'):
-        # TODO: make this a heckuva lot faster.
-        g = nx.Graph()
+        g = Graph()
+        vertices = {}
+        image_to_vert = {}
+        cmd_to_vert = {}
+        edges = []
 
         # All commands that are used in these images.
         commands = set()
         for cmds in images.values():
             commands.update(cmds)
 
+        # Vertices are all images and all commands.
+        idx = 0
+        for i in images:
+            vertices[idx] = 'image-%s' % i
+            image_to_vert[i] = idx
+            idx += 1
+        for c in commands:
+            vertices[idx] = 'cmd-%s' % c
+            cmd_to_vert[c] = idx
+            idx += 1
+
+        g.add_vertices(vertices)
+
         # Add nodes for all images and connect them.
         for i1, i2 in combinations(images, 2):
-            g.add_edge('image-%s' % i1, 'image-%s' % i2)
+            edges.append((image_to_vert[i1], image_to_vert[i2]))
 
         # Add nodes for all commands and connect them.
         for c1, c2 in combinations(commands, 2):
-            g.add_edge('cmd-%s' % c1, 'cmd-%s' % c2)
+            edges.append((cmd_to_vert[c1], cmd_to_vert[c2]))
 
         # Connect images and commands that are related.
         for i, cmds in images.items():
             for c in cmds:
-                g.add_edge('image-%s' % i, 'cmd-%s' % c)
+                edges.append((image_to_vert[i], cmd_to_vert[c]))
+
+        g.add_edges(edges)
 
         # Find all maximal cliques. Filter out those with < 2 images.
         # Fix the image and command names.
         cliques = []
         num = 1
-        for c in find_cliques(g):
-            imgs = set([x.replace('image-','') for x in c if x.startswith('image-')])
-            cmds = set([x.replace('cmd-','') for x in c if x.startswith('cmd-')])
+        for c in g.maximal_cliques(3):  # At least 2 images and 1 command
+            imgs = set([
+                vertices[x].replace('image-', '') for x in c
+                if vertices[x].startswith('image-')
+            ])
+            cmds = set([
+                vertices[x].replace('cmd-', '') for x in c
+                if vertices[x].startswith('cmd-')
+            ])
             if len(imgs) > 1 and cmds:
                 total_time = sum(self.commands[c] for c in cmds)
 
