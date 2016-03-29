@@ -1,10 +1,11 @@
 from operator import itemgetter
 
+
 class Solution(object):
     def __init__(self, problem, schedule, elapsed_time):
         self.problem = problem
         self.schedule = schedule
-        self.elapsed_time = elapsed_time # time to find the solution
+        self.elapsed_time = elapsed_time  # time to find the solution
 
     def stats(self):
         '''Returns (# of unique images, total compute time) of schedule'''
@@ -35,7 +36,6 @@ class Solution(object):
                     end = '\n'
                 else:
                     end = ',\n'
-                fp.write(('        "%s": %r%s' % (i, v, end)).replace("'",'"').replace('u',''))
+                fp.write(('        "%s": %r%s' % (i, v, end)).replace("'", '"').replace('u', ''))
             fp.write('    }\n')
             fp.write('}\n')
-
