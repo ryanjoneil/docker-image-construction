@@ -1,14 +1,14 @@
 from collections import defaultdict
 from itertools import product
 from gurobipy import GRB, Model, quicksum as sum
-import sys
+
 
 class CliqueModelGurobi(object):
     '''Transformed set packing model over maximal cliques'''
     _slug = 'clique-model-gurobi'
 
     def __init__(self, time=None):
-        self.time = time # in minutes
+        self.time = time  # in minutes
 
     def slug(self):
         return CliqueModelGurobi._slug
@@ -37,7 +37,7 @@ class CliqueModelGurobi(object):
                 name = 'x[%s,%s]' % (img, cmd)
                 x[name] = v = model.addVar(vtype=GRB.BINARY, name=name)
                 self._obj.append(problem.commands[cmd] * v)
-                by_img_cmd[img,cmd].append(v)
+                by_img_cmd[img, cmd].append(v)
 
         # cliques[i] = 1 if clique i is used, 0 otherwise
         self.cliques = {}
@@ -48,18 +48,17 @@ class CliqueModelGurobi(object):
             self.model.addConstr(sum(vlist) == 1)
 
         model.setObjective(sum(self._obj), GRB.MINIMIZE)
-        model.optimize()#lambda *args: self._callback(saver, *args))
+        model.optimize()  # lambda *args: self._callback(saver, *args))
 
         # TODO: callback
         # Translate the output of this to a schedule.
         schedule = defaultdict(list)
         self._translate(schedule, clique_data)
         for name, v in x.items():
-            img, cmd = name.replace('x[','').replace(']','').split(',')
+            img, cmd = name.replace('x[', '').replace(']', '').split(',')
             if v.x > 0.5:
                 schedule[img].append(cmd)
         saver(schedule)
-
 
     def _update(self, clique_data, parent=None):
         for c in clique_data['cliques']:
@@ -70,7 +69,7 @@ class CliqueModelGurobi(object):
             self.model.update()
 
             for img, cmd in product(c['images'], c['commands']):
-                self.by_img_cmd[img,cmd].append(v)
+                self.by_img_cmd[img, cmd].append(v)
 
             self._obj.append(c['time'] * v)
 
@@ -89,5 +88,4 @@ class CliqueModelGurobi(object):
                 for img, cmd in product(c['images'], c['commands']):
                     schedule[img].append(cmd)
                 for child in c['children']:
-                   self._translate(schedule, child)
-
+                    self._translate(schedule, child)
