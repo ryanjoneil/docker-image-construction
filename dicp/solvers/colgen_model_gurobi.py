@@ -25,7 +25,8 @@ class ColgenModelGurobi(object):
                 self.img_cmd_to_cliques[img, cmd].append(sig)
 
         while True:
-            self._master()
+            duals = self._master()
+            print duals
             break
 
     def _master(self):
@@ -44,9 +45,13 @@ class ColgenModelGurobi(object):
         model.update()
 
         # Each image has to run each of its commands.
+        constraints = {}
         for img, cmds in self.problem.images.items():
             for cmd in cmds:
-                model.addConstr(sum(x[c] for c in self.img_cmd_to_cliques[img, cmd]) >= 1)
+                vlist = [x[c] for c in self.img_cmd_to_cliques[img, cmd]]
+                constraints[img, cmd] = model.addConstr(sum(vlist) >= 1)
 
         model.setObjective(sum(obj), GRB.MINIMIZE)
         model.optimize()
+
+        return {k: c.pi for k, c in constraints.items()}
