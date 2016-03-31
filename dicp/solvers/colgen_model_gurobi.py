@@ -1,6 +1,7 @@
 from collections import defaultdict
 from gurobipy import GRB, Model, quicksum as sum
-from itertools import product
+from itertools import combinations, product
+import time
 
 
 class ColgenModelGurobi(object):
@@ -28,12 +29,15 @@ class ColgenModelGurobi(object):
         # Start with no intersections
         self.intersections = defaultdict(list)
 
-        while True:
+        for iteration in range(100):
+            print '[%02d / %s]' % (iteration, time.asctime())
+
             img_cmd_duals, img_inter_duals = self._master()
             sig = self._subproblem(img_cmd_duals, img_inter_duals)
 
             imgs, cmds = sig
             if imgs and cmds and sig not in self.cliques:
+                print '{%s}' % ', '.join([str(s) for s in imgs + cmds])
                 for img in imgs:
                     self.intersections[img].append(sig)
 
@@ -43,11 +47,15 @@ class ColgenModelGurobi(object):
 
             else:
                 for foo in self._master(final=True):
-                    print foo
+                    if len(foo[0]) > 1:
+                        print foo
                 break
+
+            print
 
     def _master(self, final=False):
         model = Model()
+        model.setParam('OutputFlag', False)
         obj = []
 
         # x[i,c] = 1 if clique c is used
@@ -72,32 +80,44 @@ class ColgenModelGurobi(object):
                 else:
                     img_cmd_constraints[img, cmd] = model.addConstr(sum(vlist) >= 1)
 
-        # Cliques that intersect can only have one on
-        img_inter_constraints = {}
-        for img, inter in self.intersections.items():
-            if len(inter) > 1:
-                vlist = [x[c] for c in inter]
-                img_inter_constraints[img] = model.addConstr(sum(vlist) <= 1)
+        # # Cliques that intersect can only have one on
+        # img_inter_constraints = {}
+        # for img, inter in self.intersections.items():
+        #     if len(inter) > 1:
+        #         vlist = [x[c] for c in inter]
+        #         img_inter_constraints[img] = model.addConstr(sum(vlist) <= 1)
+
+        for sig1, sig2 in combinations(self.cliques, 2):
+            imgs1, _ = sig1
+            imgs2, _ = sig2
+            imgs1 = set(imgs1)
+            imgs2 = set(imgs2)
+            if imgs1.intersection(imgs2) and imgs1 - imgs2 and imgs2 - imgs1:
+                model.addConstr(x[sig1] + x[sig2] <= 1)
 
         model.setObjective(sum(obj), GRB.MINIMIZE)
         model.optimize()
 
         if final:
+            print 'OBJ: %.02f' % model.objVal
             return [c for c in self.cliques if x[c].x > 0.5]
         else:
             img_cmd_duals = defaultdict(float)
             img_inter_duals = defaultdict(float)
 
-            for k, c in img_cmd_constraints.items():
+            for k, c in sorted(img_cmd_constraints.items()):
+                print '(img/cmd dual) {%s, %s} = %.02f' % (k[0], k[1], c.pi)
                 img_cmd_duals[k] = c.pi
 
-            for k, c in img_inter_constraints.items():
-                img_inter_duals[k] = c.pi
+            # for k, c in sorted(img_inter_constraints.items()):
+            #     print '(img/int dual) %s = %.02f' % (k, c.pi)
+            #     img_inter_duals[k] = c.pi
 
             return img_cmd_duals, img_inter_duals
 
     def _subproblem(self, img_cmd_duals, img_inter_duals):
         model = Model()
+        model.setParam('OutputFlag', False)
         obj = []
 
         imgs = {}
