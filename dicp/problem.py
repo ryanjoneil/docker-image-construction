@@ -103,6 +103,10 @@ class Problem(object):
                     self._shared_cmds[img_i,img_j] = set(cmds_i) & set(cmds_j)
             return self._shared_cmds
 
+    @property
+    def num_pairs(self):
+        return sum(len(cmds) for cmds in self.images.values())
+
     def cliques(self):
         '''Returns all maximal cliques with 2+ images & their intersections'''
         return self._cliques(self.images)
