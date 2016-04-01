@@ -220,6 +220,13 @@ class ColgenModelGurobi(object):
                 if len(imgs2_diff) > 1:
                     sigs.append((tuple(sorted(imgs2_diff)), tuple(sorted(cmds2))))
 
+            all_imgs = imgs1.union(imgs2)
+            inter_cmds = set(self.problem.commands)
+            for i in all_imgs:
+                inter_cmds = inter_cmds.intersection(set(self.problem.images[i]))
+            if inter_cmds:
+                sigs.append((tuple(sorted(all_imgs)), tuple(sorted(inter_cmds))))
+
         return sigs
 
     def _subproblem3(self, clique_bound_duals):
