@@ -217,7 +217,7 @@ class ColgenModelGurobi(object):
                     sigs.append((tuple(sorted(imgs1_diff)), tuple(sorted(cmds1))))
 
                 imgs2_diff = imgs2 - inter_imgs
-                if imgs2_diff:
+                if len(imgs2_diff) > 1:
                     sigs.append((tuple(sorted(imgs2_diff)), tuple(sorted(cmds2))))
 
         return sigs
