@@ -191,6 +191,7 @@ class ColgenModelGurobi(object):
         for (sig1, sig2), dual in self.clique_inter_duals.items():
             if dual < 0:
                 d[sig1, sig2] = v = model.addVar(vtype=GRB.BINARY)
+                obj.append(dual * v)
 
         model.update()
 
@@ -215,9 +216,6 @@ class ColgenModelGurobi(object):
             inter_cmds = set(cmds1).intersection(set(cmds2))
             for c in inter_cmds:
                 model.addConstr(v <= cmds[c])
-
-            cost = sum(self.problem.commands[c] * len(inter_imgs) for c in inter_cmds)
-            obj.append((cost + self.clique_inter_duals[sig1, sig2]) * v)
 
         model.setObjective(sum(obj), GRB.MINIMIZE)
         model.optimize()
