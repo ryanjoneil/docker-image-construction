@@ -40,7 +40,7 @@ class ColgenModelGurobi(object):
             done = True
             self._master()
 
-            for sig in self._subproblem():
+            for sig in self._subproblems():
                 imgs, cmds = sig
                 if imgs and cmds and sig not in self.cliques:
                     print '[new clique] {%s, %s}' % (' '.join(map(str, imgs)), ' '.join(map(str, cmds)))
@@ -168,7 +168,12 @@ class ColgenModelGurobi(object):
                     print '[clique/inter dual] {%s, %s} | {%s, %s} = %.02f' % (imgs1, cmds1, imgs2, cmds2, c.pi)
                 self.clique_inter_duals[k] = c.pi
 
-    def _subproblem(self):
+    def _subproblems(self):
+        return self._subproblem1() + self._subproblem2()
+
+    def _subproblem1(self):
+        sigs = []
+
         model = Model()
         model.setParam('OutputFlag', False)
         obj = []
@@ -187,12 +192,6 @@ class ColgenModelGurobi(object):
             y[i, c] = v = model.addVar(name='y_%s_%s' % (i, c), vtype=GRB.BINARY)
             obj.append(-self.img_cmd_duals[i, c] * v)
 
-        d = {}
-        for (sig1, sig2), dual in self.clique_inter_duals.items():
-            if dual < 0:
-                d[sig1, sig2] = v = model.addVar(vtype=GRB.BINARY)
-                obj.append(dual * v)
-
         model.update()
 
         for i, c in product(self.problem.images, self.problem.commands):
@@ -205,24 +204,50 @@ class ColgenModelGurobi(object):
                 model.addConstr(y[i, c] <= 0)
                 model.addConstr(y[i, c] >= imgs[i] + cmds[c] - 1)
 
-        for (sig1, sig2), v in d.items():
-            imgs1, cmds1 = sig1
-            imgs2, cmds2 = sig2
-
-            inter_imgs = set(imgs1).intersection(set(imgs2))
-            for i in inter_imgs:
-                model.addConstr(v <= imgs[i])
-
-            inter_cmds = set(cmds1).intersection(set(cmds2))
-            for c in inter_cmds:
-                model.addConstr(v <= cmds[c])
-
         model.setObjective(sum(obj), GRB.MINIMIZE)
         model.optimize()
 
         if model.objVal < 0:
             images = tuple(sorted([i for i, v in imgs.items() if v.x > 0.5]))
             commands = tuple(sorted([c for c, v in cmds.items() if v.x > 0.5]))
-            return [(images, commands)]
+            sigs.append((images, commands))
 
-        return []
+        return sigs
+
+    def _subproblem2(self):
+        sigs = []
+
+        for (sig1, sig2), dual in self.clique_inter_duals.items():
+            if dual >= 0:
+                continue
+
+            imgs1, cmds1 = sig1
+            imgs2, cmds2 = sig2
+
+            inter_imgs = set(imgs1).intersection(set(imgs2))
+            if inter_imgs:
+                all_cmds = set(cmds1).union(set(cmds2))
+                sigs.append((tuple(sorted(inter_imgs)), tuple(sorted(all_cmds))))
+
+                left_imgs = set(imgs1) - inter_imgs
+                if left_imgs:
+                    sigs.append((tuple(sorted(left_imgs)), cmds1))
+
+                right_imgs = set(imgs2) - inter_imgs
+                if right_imgs:
+                    sigs.append((tuple(sorted(right_imgs)), cmds2))
+
+            inter_cmds = set(cmds1).intersection(set(cmds2))
+            if inter_cmds:
+                all_imgs = set(imgs1).union(set(imgs2))
+                sigs.append((tuple(sorted(all_imgs)), tuple(sorted(inter_cmds))))
+
+                left_cmds = set(cmds1) - inter_cmds
+                if left_cmds:
+                    sigs.append((imgs1, tuple(sorted(left_cmds))))
+
+                right_cmds = set(cmds2) - inter_cmds
+                if right_cmds:
+                    sigs.append((imgs2, tuple(sorted(right_cmds))))
+
+        return sigs
