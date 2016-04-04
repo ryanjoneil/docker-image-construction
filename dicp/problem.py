@@ -36,8 +36,17 @@ class Problem(object):
         return Problem(p['commands'], p['images'])
 
     def __init__(self, commands, images):
-        self.commands = OrderedDict(sorted(commands.items(), key=itemgetter(0)))
         self.images = OrderedDict(sorted(images.items(), key=itemgetter(0)))
+
+        # If a command isn't used, we can ignore it.
+        used_cmds = set()
+        for cmds in self.images.values():
+            used_cmds = used_cmds.union(set(cmds))
+
+        self.commands = OrderedDict(sorted(
+            [(c, t) for c, t in commands.items() if c in used_cmds],
+            key=itemgetter(0)
+        ))
 
     def save(self, path):
         '''Saves a DICP instance to a json file'''
