@@ -21,26 +21,18 @@ class ColgenModelGurobi(object):
         self.cliques = set()
         self.img_cmd_to_cliques = defaultdict(list)
         for img, cmds in problem.images.items():
-            # One clique for all commands
-            all_sig = ((img,), tuple(sorted(cmds)))
-            self.cliques.add(all_sig)
             for cmd in cmds:
-                self.img_cmd_to_cliques[img, cmd].append(all_sig)
+                sig = ((img,), (cmd,))
+                self.cliques.add(sig)
+                self.img_cmd_to_cliques[img, cmd].append(sig)
 
-            # And one clique per command
-            if len(cmds) > 1:
-                for cmd in cmds:
-                    sig = ((img,), (cmd,))
-                    self.cliques.add(sig)
-                    self.img_cmd_to_cliques[img, cmd].append(sig)
-
-        for iteration in range(100):
+        for iteration in range(1000):
             print '[iteration %02d / %s]' % (iteration + 1, time.asctime())
 
             done = True
             self._master()
 
-            for sig in self._subproblems():
+            for sig in self._subproblem():
                 imgs, cmds = sig
                 if imgs and cmds and sig not in self.cliques:
                     print '[new clique] {%s, %s}' % (' '.join(map(str, imgs)), ' '.join(map(str, cmds)))
@@ -66,12 +58,13 @@ class ColgenModelGurobi(object):
 
     def _master(self, final=False):
         self.num_cmds_dual = 0.0
-        self.img_cmd_duals = defaultdict(float)
+        self.img_cmd_extra_duals = defaultdict(float)
+        self.img_cmd_slack_duals = defaultdict(float)
         self.clique_bound_duals = defaultdict(float)
         self.clique_inter_duals = defaultdict(float)
 
         model = Model()
-        model.setParam('OutputFlag', False)
+        model.params.OutputFlag = False
         obj = []
 
         # x[i,c] = 1 if clique c is used
@@ -91,14 +84,16 @@ class ColgenModelGurobi(object):
         num_cmds_constraint = model.addConstr(sum(num_cmds_by_clique) <= self.problem.num_pairs)
 
         # Each image has to run each of its commands.
-        img_cmd_constraints = {}
+        img_cmd_extra_constraints = {}
+        img_cmd_slack_constraints = {}
         for img, cmds in self.problem.images.items():
             for cmd in cmds:
                 vlist = [x[c] for c in self.img_cmd_to_cliques[img, cmd]]
                 if final:
                     model.addConstr(sum(vlist) == 1)
                 else:
-                    img_cmd_constraints[img, cmd] = model.addConstr(sum(vlist) >= 1)
+                    img_cmd_extra_constraints[img, cmd] = model.addConstr(sum(vlist) >= 1)
+                    img_cmd_slack_constraints[img, cmd] = model.addConstr(sum(vlist) <= 1)
 
         # Upper bounds on cliques
         clique_bound_constraints = {}
@@ -141,8 +136,12 @@ class ColgenModelGurobi(object):
                 duals = []
                 for cmd in self.problem.commands:
                     try:
-                        self.img_cmd_duals[img, cmd] = img_cmd_constraints[img, cmd].pi
-                        duals.append(round(img_cmd_constraints[img, cmd].pi, 1) or '')
+                        extra = img_cmd_extra_constraints[img, cmd].pi
+                        slack = img_cmd_slack_constraints[img, cmd].pi
+
+                        self.img_cmd_extra_duals[img, cmd] = extra
+                        self.img_cmd_slack_duals[img, cmd] = slack
+                        duals.append(round(extra + slack, 1) or '')
                     except KeyError:
                         duals.append('')
                 print '% 4s | %s' % (img, ' '.join('% 6s' % d for d in duals))
@@ -168,14 +167,12 @@ class ColgenModelGurobi(object):
                     print '[clique/inter dual] {%s, %s} | {%s, %s} = %.02f' % (imgs1, cmds1, imgs2, cmds2, c.pi)
                 self.clique_inter_duals[k] = c.pi
 
-    def _subproblems(self):
-        return self._subproblem1() + self._subproblem2()
-
-    def _subproblem1(self):
+    def _subproblem(self):
         sigs = []
 
         model = Model()
-        model.setParam('OutputFlag', False)
+        model.params.OutputFlag = False
+        model.params.LazyConstraints = True
         obj = []
 
         imgs = {}
@@ -185,12 +182,12 @@ class ColgenModelGurobi(object):
         cmds = {}
         for c, t in self.problem.commands.items():
             cmds[c] = v = model.addVar(name='c_%s' % c, vtype=GRB.BINARY)
-            obj.append(t * v)
+            obj.append(-t * v)
 
         y = {}
         for i, c in product(self.problem.images, self.problem.commands):
             y[i, c] = v = model.addVar(name='y_%s_%s' % (i, c), vtype=GRB.BINARY)
-            obj.append(-self.img_cmd_duals[i, c] * v)
+            obj.append((self.img_cmd_extra_duals[i, c] + self.img_cmd_slack_duals[i, c]) * v)
 
         model.update()
 
@@ -200,54 +197,43 @@ class ColgenModelGurobi(object):
                 model.addConstr(y[i, c] <= cmds[c])
                 model.addConstr(y[i, c] >= imgs[i] + cmds[c] - 1)
             else:
-                model.addConstr(y[i, c] <= imgs[i])
                 model.addConstr(y[i, c] <= 0)
-                model.addConstr(y[i, c] >= imgs[i] + cmds[c] - 1)
+                model.addConstr(imgs[i] + cmds[c] <= 1)
 
-        model.setObjective(sum(obj), GRB.MINIMIZE)
-        model.optimize()
+        model.addConstr(sum(imgs.values()) >= 2)
+        model.addConstr(sum(cmds.values()) >= 1)
 
-        if model.objVal < 0:
+        for ims, cs in self.cliques:
+            if len(ims) < 2:
+                continue
+
+            vlist = [imgs[i] for i in ims] + [cmds[c] for c in cs]
+            model.addConstr(sum(vlist) <= len(ims) + len(cs) - 1)
+
+        model.setObjective(sum(obj) + self.num_cmds_dual, GRB.MAXIMIZE)
+
+        def callback(m, where):
+            # This callback ensures the cliques generated are maximal
+            if where != GRB.Callback.MIPSOL:
+                return
+
+            # TODO: this part is wrong...
+            # Get images and commands in the current clique
+            _imgs = dict(zip(imgs.keys(), m.cbGetSolution(imgs.values())))
+            _cmds = dict(zip(cmds.keys(), m.cbGetSolution(cmds.values())))
+
+            _inc_imgs = set([i for i, v in _imgs.items() if v > 0.5])
+            _inc_cmds = set([c for c, v in _cmds.items() if v > 0.5])
+
+            for i, c in product(_inc_imgs, _inc_cmds):
+                if c not in self.problem.images[i]:
+                    m.cbLazy(imgs[i] + cmds[c] <= 1)
+
+        model.optimize(callback=callback)
+
+        if model.status == GRB.OPTIMAL and model.objVal > 0:
             images = tuple(sorted([i for i, v in imgs.items() if v.x > 0.5]))
             commands = tuple(sorted([c for c, v in cmds.items() if v.x > 0.5]))
             sigs.append((images, commands))
-
-        return sigs
-
-    def _subproblem2(self):
-        sigs = []
-
-        for (sig1, sig2), dual in self.clique_inter_duals.items():
-            if dual >= 0:
-                continue
-
-            imgs1, cmds1 = sig1
-            imgs2, cmds2 = sig2
-
-            inter_imgs = set(imgs1).intersection(set(imgs2))
-            if inter_imgs:
-                all_cmds = set(cmds1).union(set(cmds2))
-                sigs.append((tuple(sorted(inter_imgs)), tuple(sorted(all_cmds))))
-
-                left_imgs = set(imgs1) - inter_imgs
-                if left_imgs:
-                    sigs.append((tuple(sorted(left_imgs)), cmds1))
-
-                right_imgs = set(imgs2) - inter_imgs
-                if right_imgs:
-                    sigs.append((tuple(sorted(right_imgs)), cmds2))
-
-            inter_cmds = set(cmds1).intersection(set(cmds2))
-            if inter_cmds:
-                all_imgs = set(imgs1).union(set(imgs2))
-                sigs.append((tuple(sorted(all_imgs)), tuple(sorted(inter_cmds))))
-
-                left_cmds = set(cmds1) - inter_cmds
-                if left_cmds:
-                    sigs.append((imgs1, tuple(sorted(left_cmds))))
-
-                right_cmds = set(cmds2) - inter_cmds
-                if right_cmds:
-                    sigs.append((imgs2, tuple(sorted(right_cmds))))
 
         return sigs

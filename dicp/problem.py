@@ -48,6 +48,11 @@ class Problem(object):
             key=itemgetter(0)
         ))
 
+        self.images_by_command = OrderedDict((c, set()) for c in self.commands)
+        for i, cmds in self.images.items():
+            for c in cmds:
+                self.images_by_command[c].add(i)
+
     def save(self, path):
         '''Saves a DICP instance to a json file'''
         # json formatting doen't make it very human readable, so we do our own.
