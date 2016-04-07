@@ -114,7 +114,7 @@ class Problem(object):
             images = self.images.items()
             for i, (img_i, cmds_i) in enumerate(images):
                 for img_j, cmds_j in images[i+1:]:
-                    self._shared_cmds[img_i,img_j] = set(cmds_i) & set(cmds_j)
+                    self._shared_cmds[img_i, img_j] = set(cmds_i) & set(cmds_j)
             return self._shared_cmds
 
     @property
