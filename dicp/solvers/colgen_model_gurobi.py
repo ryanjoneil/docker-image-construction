@@ -1,7 +1,7 @@
 from collections import defaultdict
 from dicp.clique import Clique
 from gurobipy import GRB, Model, quicksum as sum
-from itertools import product
+from itertools import combinations, product
 import time
 
 
@@ -18,16 +18,25 @@ class ColgenModelGurobi(object):
     def solve(self, problem, saver):
         self.problem = problem
 
-        # Starting cliques and their parents
-        self.cliques = defaultdict(lambda: None)  # clique -> parent clique
-        self.parent_img_cliques = defaultdict(lambda: set())  # (parent, img) -> [cliques]
+        # Starting cliques
+        self.cliques = set()
 
         self.img_cmd_to_cliques = defaultdict(list)
+        self.img_to_cliques = defaultdict(list)  # cliques with >= 2 cmds
         for img, cmds in problem.images.items():
             for cmd in cmds:
                 clique = Clique(problem, [img], [cmd])
-                self.cliques[clique] = clique.parent
+                self.cliques.add(clique)
                 self.img_cmd_to_cliques[img, cmd].append(clique)
+
+        for cmd, imgs in problem.images_by_command.items():
+            if len(imgs) < 2:
+                continue
+            clique = Clique(problem, imgs, [cmd])
+            self.cliques.add(clique)
+            for img in imgs:
+                self.img_cmd_to_cliques[img, cmd].append(clique)
+                self.img_to_cliques[img].append(clique)
 
         for iteration in range(1000):
             print '[iteration %02d / %s]' % (iteration + 1, time.asctime())
@@ -39,11 +48,11 @@ class ColgenModelGurobi(object):
                 print '[new clique] %s' % clique
 
                 done = False
-                self.cliques[clique] = clique.parent
+                self.cliques.add(clique)
                 for img, cmd in product(clique.images, clique.commands):
                     self.img_cmd_to_cliques[img, cmd].append(clique)
                 for img in clique.images:
-                    self.parent_img_cliques[img, clique.parent].add(clique)
+                    self.img_to_cliques[img].append(clique)
 
             if done:
                 solution = self._master(final=True)
@@ -61,10 +70,8 @@ class ColgenModelGurobi(object):
             print
 
     def _master(self, final=False):
-        self.num_cmds_dual = 0.0
         self.img_cmd_duals = defaultdict(float)
         self.clique_inter_duals = defaultdict(float)
-        self.clique_depend_duals = defaultdict(float)
 
         model = Model()
         model.params.OutputFlag = False
@@ -81,10 +88,6 @@ class ColgenModelGurobi(object):
 
         model.update()
 
-        # Max number of (image, command) pairs
-        num_cmds_by_clique = [clique.size * x[clique] for clique in self.cliques]
-        num_cmds_constraint = model.addConstr(sum(num_cmds_by_clique) <= self.problem.num_pairs)
-
         # Each image has to run each of its commands.
         img_cmd_constraints = {}
         for img, cmds in self.problem.images.items():
@@ -95,19 +98,13 @@ class ColgenModelGurobi(object):
                 else:
                     img_cmd_constraints[img, cmd] = model.addConstr(sum(vlist) >= 1)
 
-        # Cliques with the same parent and image can only have one on (ignores 1x1)
+        # Clique intersections
         clique_inter_constraints = {}
-        for (parent, img), cliques in self.parent_img_cliques.items():
-            if len(cliques) > 1:
-                clique_inter_constraints[parent, img] = model.addConstr(sum(x[c] for c in cliques) <= 1)
-
-        # Dependency relationships
-        clique_depend_constraints = {}
-        for clique in self.cliques:
-            if clique.parent:
-                clique_depend_constraints[clique.parent, clique] = model.addConstr(
-                    x[clique] <= x[clique.parent]
-                )
+        for cliques in self.img_to_cliques.values():
+            for c1, c2 in combinations(cliques, 2):
+                if c1.images_set - c2.images_set and c2.images_set - c1.images_set \
+                   and (c1, c2) not in clique_inter_constraints:
+                    clique_inter_constraints[c1, c2] = model.addConstr(x[c1] + x[c2] <= 1)
 
         model.setObjective(sum(obj), GRB.MINIMIZE)
         model.optimize()
@@ -133,19 +130,10 @@ class ColgenModelGurobi(object):
                 print '% 4s | %s' % (img, ' '.join('% 6s' % d for d in duals))
             print '-' * len(header)
 
-            if num_cmds_constraint.pi:
-                print '[cmds dual] = %.02f' % num_cmds_constraint.pi
-            self.num_cmds_dual = num_cmds_constraint.pi
-
-            for (parent, img), c in clique_inter_constraints.items():
+            for (c1, c2), c in clique_inter_constraints.items():
                 if c.pi:
-                    print '[clique/inter dual] { %s & %s } = %.02f' % (parent, img, c.pi)
-                self.clique_inter_duals[parent, img] = c.pi
-
-            for clique, c in clique_depend_constraints.items():
-                if c.pi:
-                    print '[clique/depend dual] %s = %.02f' % (clique, c.pi)
-                self.clique_depend_duals[clique] = c.pi
+                    print '[clique/inter dual] %s | %s = %.02f' % (c1, c2, c.pi)
+                self.clique_inter_duals[c1, c2] = c.pi
 
     def _subproblem(self):
         model = Model()
@@ -156,7 +144,6 @@ class ColgenModelGurobi(object):
         imgs = {}
         for i in self.problem.images:
             imgs[i] = v = model.addVar(name='i_%s' % i, vtype=GRB.BINARY)
-            # TODO: not sure if this goes here...
 
         cmds = {}
         for c, t in self.problem.commands.items():
@@ -167,22 +154,6 @@ class ColgenModelGurobi(object):
         for i, c in product(self.problem.images, self.problem.commands):
             y[i, c] = v = model.addVar(name='y_%s_%s' % (i, c), vtype=GRB.BINARY)
             obj.append(self.img_cmd_duals[i, c] * v)
-
-        d = {None: model.addVar(name='d_none', vtype=GRB.BINARY)}
-        for clique in self.cliques:
-            if clique.size <= 1:
-                continue
-            d[clique] = v = model.addVar(name='d_%s' % (clique,), vtype=GRB.BINARY)
-
-        for (p, _), pi in self.clique_depend_duals.items():
-            obj.append(pi * d[p])
-
-        # TODO: incorporate duals
-        # obj.append()
-
-        for (i, p), pi in self.clique_inter_duals.items():
-            obj.append(pi * (d[p])) # + imgs[i]))
-            # obj.append(pi * (d[p] + imgs[i]))
 
         model.update()
 
@@ -197,28 +168,8 @@ class ColgenModelGurobi(object):
 
         model.addConstr(sum(imgs.values()) >= 2)
         model.addConstr(sum(cmds.values()) >= 1)
-        model.addConstr(sum(d.values()) == 1)
 
-        # We can depend on another clique, but that eliminates (img, cmd) pairs
-        for clique, v in d.items():
-            if clique is None:
-                continue
-
-            for i, cs in self.problem.images.items():
-                if i in clique.remaining:
-                    cs = set(cs)
-                    for c in self.problem.images[i]:
-                        if c not in cs:
-                            model.addConstr(y[i, c] <= 1 - v)
-
-                else:
-                    model.addConstr(imgs[i] <= 1 - v)
-
-            for c in self.problem.commands:
-                if c not in clique.remaining_commands:
-                    model.addConstr(cmds[c] <= 1 - v)
-
-        model.setObjective(sum(obj) + self.num_cmds_dual, GRB.MAXIMIZE)
+        model.setObjective(sum(obj), GRB.MAXIMIZE)
 
         def callback(m, where):
             if where != GRB.Callback.MIPSOL:
@@ -234,15 +185,9 @@ class ColgenModelGurobi(object):
             images = [i for i, v in imgs.items() if v.x > 0.5]
             commands = [c for c, v in cmds.items() if v.x > 0.5]
 
-            parent = None
-            for clique, v in d.items():
-                if v.x > 0.5:
-                    parent = clique
-                    break
-
             # print 'NEW:', model.objVal, images, commands, parent
 
             # TODO: parent
-            return Clique(self.problem, images, commands, parent=parent)
+            return Clique(self.problem, images, commands)
 
         return None
