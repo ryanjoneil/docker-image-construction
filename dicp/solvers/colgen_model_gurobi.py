@@ -1,6 +1,6 @@
 from collections import defaultdict
 from dicp.clique import Clique
-from gurobipy import GRB, Model, quicksum as sum
+from gurobipy import GRB, Model, quicksum
 from itertools import combinations, product
 import time
 
@@ -43,27 +43,27 @@ class ColgenModelGurobi(object):
 
             done = True
             self._master()
-            clique = self._subproblem()
-            if clique is not None and clique not in self.cliques:
-                print '[new clique] %s' % clique
+            for clique in self._subproblems():
+                if clique is not None and clique not in self.cliques:
+                    print '[new clique] %s' % clique
 
-                done = False
-                self.cliques.add(clique)
-                for img, cmd in product(clique.images, clique.commands):
-                    self.img_cmd_to_cliques[img, cmd].append(clique)
-                for img in clique.images:
-                    self.img_to_cliques[img].append(clique)
+                    done = False
+                    self.cliques.add(clique)
+                    for img, cmd in product(clique.images, clique.commands):
+                        self.img_cmd_to_cliques[img, cmd].append(clique)
+                    for img in clique.images:
+                        self.img_to_cliques[img].append(clique)
 
             if done:
                 solution = self._master(final=True)
 
                 print '\n[solution]'
-                for clique in solution:
+                for clique in sorted(solution):
                     if len(clique.images) > 1:
                         print clique
 
                 print '\n[cliques]'
-                for clique in self.cliques:
+                for clique in sorted(self.cliques):
                     if len(clique.images) > 1:
                         print clique
                 break
@@ -94,9 +94,9 @@ class ColgenModelGurobi(object):
             for cmd in cmds:
                 vlist = [x[c] for c in self.img_cmd_to_cliques[img, cmd]]
                 if final:
-                    model.addConstr(sum(vlist) == 1)
+                    model.addConstr(quicksum(vlist) == 1)
                 else:
-                    img_cmd_constraints[img, cmd] = model.addConstr(sum(vlist) >= 1)
+                    img_cmd_constraints[img, cmd] = model.addConstr(quicksum(vlist) >= 1)
 
         # Clique intersections
         clique_inter_constraints = {}
@@ -106,7 +106,7 @@ class ColgenModelGurobi(object):
                    and (c1, c2) not in clique_inter_constraints:
                     clique_inter_constraints[c1, c2] = model.addConstr(x[c1] + x[c2] <= 1)
 
-        model.setObjective(sum(obj), GRB.MINIMIZE)
+        model.setObjective(quicksum(obj), GRB.MINIMIZE)
         model.optimize()
 
         if final:
@@ -135,7 +135,10 @@ class ColgenModelGurobi(object):
                     print '[clique/inter dual] %s | %s = %.02f' % (c1, c2, c.pi)
                 self.clique_inter_duals[c1, c2] = c.pi
 
-    def _subproblem(self):
+    def _subproblems(self):
+        return filter(None, [self._subproblem1()] + self._subproblem2())
+
+    def _subproblem1(self):
         model = Model()
         model.params.OutputFlag = False
         model.params.LazyConstraints = True
@@ -166,10 +169,10 @@ class ColgenModelGurobi(object):
                 model.addConstr(y[i, c] <= 0)
                 model.addConstr(imgs[i] + cmds[c] <= 1)
 
-        model.addConstr(sum(imgs.values()) >= 2)
-        model.addConstr(sum(cmds.values()) >= 1)
+        model.addConstr(quicksum(imgs.values()) >= 2)
+        model.addConstr(quicksum(cmds.values()) == 1)
 
-        model.setObjective(sum(obj), GRB.MAXIMIZE)
+        model.setObjective(quicksum(obj), GRB.MAXIMIZE)
 
         def callback(m, where):
             if where != GRB.Callback.MIPSOL:
@@ -187,7 +190,39 @@ class ColgenModelGurobi(object):
 
             # print 'NEW:', model.objVal, images, commands, parent
 
-            # TODO: parent
             return Clique(self.problem, images, commands)
 
         return None
+
+    def _subproblem2(self):
+        cliques = []
+        for (c1, c2), pi in self.clique_inter_duals.items():
+            if pi >= 0 or (len(c1.images) <= 2 and len(c2.images) <= 2):
+                continue
+
+            # TODO: this is a model where:
+            # - each pair is either in its clique or alone
+            # - the clique intersection is broken
+
+            imgs_left_1 = c1.images_set
+            imgs_left_2 = c1.images_set - c2.images_set
+            imgs_right_1 = c2.images_set
+            imgs_right_2 = c2.images_set - c1.images_set
+
+            for imgs_left, imgs_right in [
+                (imgs_left_1, imgs_right_1),
+                (imgs_left_2, imgs_right_2)
+            ]:
+                cost_left = sum(self.problem.commands[c] for c in c1.commands)
+                save_left = sum(self.img_cmd_duals[i, c] for i, c in product(imgs_left, c1.commands))
+
+                cost_right = sum(self.problem.commands[c] for c in c2.commands)
+                save_right = sum(self.img_cmd_duals[i, c] for i, c in product(imgs_right, c2.commands))
+
+                if cost_left + cost_right - save_left - save_right + pi < 0:
+                    if len(imgs_left) > 1:
+                        cliques.append(Clique(self.problem, imgs_left, c1.commands))
+                    if len(imgs_right) > 1:
+                        cliques.append(Clique(self.problem, imgs_right, c2.commands))
+
+        return cliques
