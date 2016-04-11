@@ -28,6 +28,7 @@ class ColgenModelGurobi(object):
                 clique = Clique(problem, [img], [cmd])
                 self.cliques.add(clique)
                 self.img_cmd_to_cliques[img, cmd].append(clique)
+                self.img_to_cliques[img].append(clique)
 
         for cmd, imgs in problem.images_by_command.items():
             if len(imgs) < 2:
@@ -43,7 +44,7 @@ class ColgenModelGurobi(object):
 
             done = True
             self._master()
-            for clique in self._subproblems():
+            for clique in self._subproblem():
                 if clique is not None and clique not in self.cliques:
                     print '[new clique] %s' % clique
 
@@ -102,8 +103,15 @@ class ColgenModelGurobi(object):
         clique_inter_constraints = {}
         for cliques in self.img_to_cliques.values():
             for c1, c2 in combinations(cliques, 2):
-                if c1.images_set - c2.images_set and c2.images_set - c1.images_set \
-                   and (c1, c2) not in clique_inter_constraints:
+                c1, c2 = tuple(sorted([c1, c2]))
+                if (c1, c2) in clique_inter_constraints:
+                    continue
+
+                disjoint_images = bool(c1.images_set - c2.images_set and c2.images_set - c1.images_set)
+                overlapping_images = bool(c1.images_set.intersection(c2.images_set))
+                overlapping_commands = bool(c1.commands_set.intersection(c2.commands_set))
+
+                if disjoint_images or (overlapping_images and overlapping_commands):
                     clique_inter_constraints[c1, c2] = model.addConstr(x[c1] + x[c2] <= 1)
 
         model.setObjective(quicksum(obj), GRB.MINIMIZE)
@@ -135,94 +143,76 @@ class ColgenModelGurobi(object):
                     print '[clique/inter dual] %s | %s = %.02f' % (c1, c2, c.pi)
                 self.clique_inter_duals[c1, c2] = c.pi
 
-    def _subproblems(self):
-        return filter(None, [self._subproblem1()] + self._subproblem2())
+    def _subproblem(self):
+        cliques = []
 
-    def _subproblem1(self):
         model = Model()
-        model.params.OutputFlag = False
+        # model.params.OutputFlag = False
         model.params.LazyConstraints = True
         obj = []
 
-        imgs = {}
-        for i in self.problem.images:
-            imgs[i] = v = model.addVar(name='i_%s' % i, vtype=GRB.BINARY)
+        y = {}  # Do we resolve the intersection?
+        p = {}  # 1 if we turn on clique c
+        q = defaultdict(dict)  # 1 if image i is run for clique c
+        r = defaultdict(dict)  # 1 if we remove image i from clique c
+        y_by_c = defaultdict(list)
 
-        cmds = {}
-        for c, t in self.problem.commands.items():
-            cmds[c] = v = model.addVar(name='c_%s' % c, vtype=GRB.BINARY)
-            obj.append(-t * v)
+        for (c1, c2), pi in self.clique_inter_duals.items():
+            y[c1, c2] = v = model.addVar(name='y_%s_%s' % (c1, c2), vtype=GRB.BINARY)
+            obj.append(pi * v)
 
-        y = {}
-        for i, c in product(self.problem.images, self.problem.commands):
-            y[i, c] = v = model.addVar(name='y_%s_%s' % (i, c), vtype=GRB.BINARY)
-            obj.append(self.img_cmd_duals[i, c] * v)
+            y_by_c[c1].append(v)
+            y_by_c[c2].append(v)
+
+            for c in (c1, c2):
+                if c not in p:
+                    p[c] = v = model.addVar(name='p_%s' % c, vtype=GRB.BINARY)
+                    obj.append(-c.cost * v)
+
+                for i in c.images:
+                    q[c][i] = v = model.addVar(name='q_%s_%s' % (c, i), vtype=GRB.BINARY)
+                    dual = sum(self.img_cmd_duals[i, cmd] for cmd in c.commands)
+                    # print '>>>', c, i, dual
+                    obj.append(dual * v)
+
+                for i in c1.images_set.intersection(c2.images_set):
+                    r[c][i] = model.addVar(name='r_%s_%s' % (c, i), vtype=GRB.BINARY)
 
         model.update()
+        for c, vs in y_by_c.items():
+            for v in vs:
+                model.addConstr(p[c] <= v)
 
-        for i, c in product(self.problem.images, self.problem.commands):
-            if c in self.problem.images[i]:
-                model.addConstr(y[i, c] <= imgs[i])
-                model.addConstr(y[i, c] <= cmds[c])
-                model.addConstr(y[i, c] >= imgs[i] + cmds[c] - 1)
-            else:
-                model.addConstr(y[i, c] <= 0)
-                model.addConstr(imgs[i] + cmds[c] <= 1)
+        for (c1, c2), v in y.items():
+            for i in c1.images_set.intersection(c2.images_set):
+                model.addConstr(v <= r[c1][i] + r[c2][i])
 
-        model.addConstr(quicksum(imgs.values()) >= 2)
-        model.addConstr(quicksum(cmds.values()) == 1)
+        for c, imgs in q.items():
+            for i, v in imgs.items():
+                model.addConstr(q[c][i] <= p[c])
+                if i in r[c]:
+                    model.addConstr(q[c][i] <= 1 - r[c][i])
 
-        model.setObjective(quicksum(obj), GRB.MAXIMIZE)
-
-        def callback(m, where):
-            if where != GRB.Callback.MIPSOL:
-                return
-
-        # TODO: add a d[None] for the line below
-        # TODO: callback to cut off known cliques if a given d is on
-
+        model.setObjective(sum(obj), GRB.MAXIMIZE)
         model.optimize()
 
-        # print 'NEW:', model.objVal
-        if model.status == GRB.OPTIMAL and model.objVal > 0:
-            images = [i for i, v in imgs.items() if v.x > 0.5]
-            commands = [c for c, v in cmds.items() if v.x > 0.5]
-
-            # print 'NEW:', model.objVal, images, commands, parent
-
-            return Clique(self.problem, images, commands)
-
-        return None
-
-    def _subproblem2(self):
-        cliques = []
-        for (c1, c2), pi in self.clique_inter_duals.items():
-            if pi >= 0 or (len(c1.images) <= 2 and len(c2.images) <= 2):
+        for c, v in p.items():
+            if v.x < 0.5:
                 continue
 
-            # TODO: this is a model where:
-            # - each pair is either in its clique or alone
-            # - the clique intersection is broken
+            # Figure out what images are left in the clique
+            rem_imgs = set(c.images)
+            for i, riv in r[c].items():
+                if riv.x > 0.5:
+                    rem_imgs.remove(i)
 
-            imgs_left_1 = c1.images_set
-            imgs_left_2 = c1.images_set - c2.images_set
-            imgs_right_1 = c2.images_set
-            imgs_right_2 = c2.images_set - c1.images_set
+            if len(rem_imgs) > 1:
+                cliques.append(Clique(self.problem, rem_imgs, c.commands))
 
-            for imgs_left, imgs_right in [
-                (imgs_left_1, imgs_right_1),
-                (imgs_left_2, imgs_right_2)
-            ]:
-                cost_left = sum(self.problem.commands[c] for c in c1.commands)
-                save_left = sum(self.img_cmd_duals[i, c] for i, c in product(imgs_left, c1.commands))
-
-                cost_right = sum(self.problem.commands[c] for c in c2.commands)
-                save_right = sum(self.img_cmd_duals[i, c] for i, c in product(imgs_right, c2.commands))
-
-                if cost_left + cost_right - save_left - save_right + pi < 0:
-                    if len(imgs_left) > 1:
-                        cliques.append(Clique(self.problem, imgs_left, c1.commands))
-                    if len(imgs_right) > 1:
-                        cliques.append(Clique(self.problem, imgs_right, c2.commands))
+        print
+        print 'CLIQUES'
+        for c in cliques:
+            print 'NEW:', c
+        print
 
         return cliques
