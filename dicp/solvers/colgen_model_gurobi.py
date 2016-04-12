@@ -152,10 +152,17 @@ class ColgenModelGurobi(object):
         obj = []
 
         y = {}  # Do we resolve the intersection?
+        yl = {}
+        yi = {}
+        yr = {}
         p = {}  # 1 if we turn on clique c
         q = defaultdict(dict)  # 1 if image i is run for clique c
         r = defaultdict(dict)  # 1 if we remove image i from clique c
+
         y_by_c = defaultdict(list)
+        yl_by_c = defaultdict(list)
+        yi_by_c = defaultdict(list)
+        yr_by_c = defaultdict(list)
 
         for (c1, c2), pi in self.clique_inter_duals.items():
             y[c1, c2] = v = model.addVar(name='y_%s_%s' % (c1, c2), vtype=GRB.BINARY)
@@ -163,6 +170,18 @@ class ColgenModelGurobi(object):
 
             y_by_c[c1].append(v)
             y_by_c[c2].append(v)
+
+            yl[c1, c2] = v = model.addVar(name='yl_%s_%s' % (c1, c2), vtype=GRB.BINARY)
+            yl_by_c[c1].append(v)
+            yl_by_c[c2].append(v)
+
+            yi[c1, c2] = v = model.addVar(name='yi_%s_%s' % (c1, c2), vtype=GRB.BINARY)
+            yi_by_c[c1].append(v)
+            yi_by_c[c2].append(v)
+
+            yr[c1, c2] = v = model.addVar(name='yr_%s_%s' % (c1, c2), vtype=GRB.BINARY)
+            yr_by_c[c1].append(v)
+            yr_by_c[c2].append(v)
 
             for c in (c1, c2):
                 if c not in p:
@@ -172,7 +191,6 @@ class ColgenModelGurobi(object):
                 for i in c.images:
                     q[c][i] = v = model.addVar(name='q_%s_%s' % (c, i), vtype=GRB.BINARY)
                     dual = sum(self.img_cmd_duals[i, cmd] for cmd in c.commands)
-                    # print '>>>', c, i, dual
                     obj.append(dual * v)
 
                 for i in c1.images_set.intersection(c2.images_set):
@@ -183,9 +201,22 @@ class ColgenModelGurobi(object):
             for v in vs:
                 model.addConstr(p[c] <= v)
 
-        for (c1, c2), v in y.items():
+        for c in y_by_c:
+            for v, vl, vi, vr in zip(y_by_c[c], yl_by_c[c], yi_by_c[c], yr_by_c[c]):
+                model.addConstr(v <= vl + vi + vr)
+                model.addConstr(vl + vi + vr <= 1)
+
+        for (c1, c2), vl in yl.items():
+            for i in c1.images_set - c2.images_set:
+                model.addConstr(vl <= r[c1][i])
+
+        for (c1, c2), vi in yi.items():
             for i in c1.images_set.intersection(c2.images_set):
-                model.addConstr(v <= r[c1][i] + r[c2][i])
+                model.addConstr(vi <= r[c1][i] + r[c2][i])
+
+        for (c1, c2), vr in yr.items():
+            for i in c2.images_set - c1.images_set:
+                model.addConstr(vr <= r[c2][i])
 
         for c, imgs in q.items():
             for i, v in imgs.items():
@@ -208,11 +239,5 @@ class ColgenModelGurobi(object):
 
             if len(rem_imgs) > 1:
                 cliques.append(Clique(self.problem, rem_imgs, c.commands))
-
-        print
-        print 'CLIQUES'
-        for c in cliques:
-            print 'NEW:', c
-        print
 
         return cliques
