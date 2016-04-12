@@ -138,7 +138,7 @@ class ColgenModelGurobi(object):
                 print '% 4s | %s' % (img, ' '.join('% 6s' % d for d in duals))
             print '-' * len(header)
 
-            for (c1, c2), c in clique_inter_constraints.items():
+            for (c1, c2), c in sorted(clique_inter_constraints.items()):
                 if c.pi:
                     print '[clique/inter dual] %s | %s = %.02f' % (c1, c2, c.pi)
                 self.clique_inter_duals[c1, c2] = c.pi
