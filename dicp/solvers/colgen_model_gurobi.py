@@ -44,8 +44,7 @@ class ColgenModelGurobi(object):
 
             done = True
             self._master()
-            # for clique in self._subproblem_global():
-            for clique in self._subproblem_local():
+            for clique in self._subproblem():
                 if clique is not None and clique not in self.cliques:
                     print '[new clique] %s' % clique
 
@@ -144,112 +143,14 @@ class ColgenModelGurobi(object):
                     print '[clique/inter dual] %s | %s = %.02f' % (c1, c2, c.pi)
                 self.clique_inter_duals[c1, c2] = c.pi
 
-    def _subproblem_global(self):
-        cliques = []
-
-        model = Model()
-        # model.params.OutputFlag = False
-        obj = []
-
-        y = {}  # Do we resolve the intersection?
-        yl = {}
-        yi = {}
-        yr = {}
-        p = {}  # 1 if we turn on clique c
-        q = defaultdict(dict)  # 1 if image i is run for clique c
-        r = defaultdict(dict)  # 1 if we remove image i from clique c
-
-        y_by_c = defaultdict(list)
-        yl_by_c = defaultdict(list)
-        yi_by_c = defaultdict(list)
-        yr_by_c = defaultdict(list)
-
-        for (c1, c2), pi in self.clique_inter_duals.items():
-            y[c1, c2] = v = model.addVar(name='y_%s_%s' % (c1, c2), vtype=GRB.BINARY)
-            obj.append(pi * v)
-
-            y_by_c[c1].append(v)
-            y_by_c[c2].append(v)
-
-            yl[c1, c2] = v = model.addVar(name='yl_%s_%s' % (c1, c2), vtype=GRB.BINARY)
-            yl_by_c[c1].append(v)
-            yl_by_c[c2].append(v)
-
-            yi[c1, c2] = v = model.addVar(name='yi_%s_%s' % (c1, c2), vtype=GRB.BINARY)
-            yi_by_c[c1].append(v)
-            yi_by_c[c2].append(v)
-
-            yr[c1, c2] = v = model.addVar(name='yr_%s_%s' % (c1, c2), vtype=GRB.BINARY)
-            yr_by_c[c1].append(v)
-            yr_by_c[c2].append(v)
-
-            for c in (c1, c2):
-                if c not in p:
-                    p[c] = v = model.addVar(name='p_%s' % c, vtype=GRB.BINARY)
-                    obj.append(-c.cost * v)
-
-                for i in c.images:
-                    q[c][i] = v = model.addVar(name='q_%s_%s' % (c, i), vtype=GRB.BINARY)
-                    dual = sum(self.img_cmd_duals[i, cmd] for cmd in c.commands)
-                    obj.append(dual * v)
-
-                for i in c1.images_set.intersection(c2.images_set):
-                    r[c][i] = model.addVar(name='r_%s_%s' % (c, i), vtype=GRB.BINARY)
-
-        model.update()
-        for c, vs in y_by_c.items():
-            for v in vs:
-                model.addConstr(p[c] <= v)
-
-        for c in y_by_c:
-            for v, vl, vi, vr in zip(y_by_c[c], yl_by_c[c], yi_by_c[c], yr_by_c[c]):
-                model.addConstr(v <= vl + vi + vr)
-                model.addConstr(vl + vi + vr <= 1)
-
-        for (c1, c2), vl in yl.items():
-            for i in c1.images_set - c2.images_set:
-                model.addConstr(vl <= r[c1][i])
-
-        for (c1, c2), vi in yi.items():
-            for i in c1.images_set.intersection(c2.images_set):
-                model.addConstr(vi <= r[c1][i] + r[c2][i])
-
-        for (c1, c2), vr in yr.items():
-            for i in c2.images_set - c1.images_set:
-                model.addConstr(vr <= r[c2][i])
-
-        for c, imgs in q.items():
-            for i, v in imgs.items():
-                model.addConstr(q[c][i] <= p[c])
-                if i in r[c]:
-                    model.addConstr(q[c][i] <= 1 - r[c][i])
-
-        model.setObjective(sum(obj), GRB.MAXIMIZE)
-        model.optimize()
-
-        for c, v in p.items():
-            if v.x < 0.5:
-                continue
-
-            # Figure out what images are left in the clique
-            rem_imgs = set(c.images)
-            for i, riv in r[c].items():
-                if riv.x > 0.5:
-                    rem_imgs.remove(i)
-
-            if len(rem_imgs) > 1:
-                cliques.append(Clique(self.problem, rem_imgs, c.commands))
-
-        return cliques
-
-    def _subproblem_local(self):
+    def _subproblem(self):
         cliques = []
 
         for (c1, c2), pi in self.clique_inter_duals.items():
             int_images = c1.images_set.intersection(c2.images_set)
 
             # Remove images in c1 not in c2
-            z = -c1.cost
+            z = pi - c1.cost
             for i in int_images:
                 dual = sum(self.img_cmd_duals[i, cmd] for cmd in c1.commands)
                 z += dual
@@ -258,15 +159,18 @@ class ColgenModelGurobi(object):
                 cliques.append(Clique(self.problem, int_images, c1.commands))
 
             # Remove images in c2 not in c1
-            z = -c2.cost
+            z = pi - c2.cost
             for i in int_images:
-                dual = sum(self.img_cmd_duals[i, cmd] for cmd in c1.commands)
+                dual = sum(self.img_cmd_duals[i, cmd] for cmd in c2.commands)
                 z += dual
 
             if z > 0:
                 cliques.append(Clique(self.problem, int_images, c2.commands))
 
             # Pare images off until they don't intersect anymore
+            if len(c1.images) <= 2 or len(c2.images) <= 2:
+                continue
+
             model = Model()
             model.params.OutputFlag = False
 
