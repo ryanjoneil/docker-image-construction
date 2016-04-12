@@ -4,7 +4,6 @@ from igraph import Graph
 from operator import itemgetter
 import json
 import math
-import networkx as nx
 import numpy as np
 import random
 
@@ -169,7 +168,7 @@ class Problem(object):
         # Fix the image and command names.
         cliques = []
         num = 1
-        for c in g.maximal_cliques(3):  # At least 2 images and 1 command
+        for c in g.cliques(3):  # At least 2 images and 1 command
             imgs = set([
                 vertices[x].replace('image-', '') for x in c
                 if vertices[x].startswith('image-')

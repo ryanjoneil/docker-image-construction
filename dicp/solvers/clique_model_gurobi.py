@@ -43,6 +43,8 @@ class CliqueModelGurobi(object):
         self.cliques = {}
         self._update(clique_data)
 
+        for c in clique_data['cliques']:
+            print c
         # Each image has to run each of its commands.
         for img_cmd, vlist in by_img_cmd.items():
             self.model.addConstr(sum(vlist) == 1)
