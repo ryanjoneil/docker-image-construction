@@ -150,21 +150,21 @@ class ColgenModelGurobi(object):
             int_images = c1.images_set.intersection(c2.images_set)
 
             # Remove images in c1 not in c2
-            z = pi - c1.cost
+            z = pi + c1.cost
             for i in int_images:
                 dual = sum(self.img_cmd_duals[i, cmd] for cmd in c1.commands)
-                z += dual
+                z -= dual
 
-            if z > 0:
+            if z < 0:
                 cliques.append(Clique(self.problem, int_images, c1.commands))
 
             # Remove images in c2 not in c1
-            z = pi - c2.cost
+            z = pi + c2.cost
             for i in int_images:
                 dual = sum(self.img_cmd_duals[i, cmd] for cmd in c2.commands)
-                z += dual
+                z -= dual
 
-            if z > 0:
+            if z < 0:
                 cliques.append(Clique(self.problem, int_images, c2.commands))
 
             # Pare images off until they don't intersect anymore
@@ -186,16 +186,16 @@ class ColgenModelGurobi(object):
 
             model.update()
 
-            obj.append(-c1.cost * p1)
-            obj.append(-c2.cost * p2)
+            obj.append(c1.cost * p1)
+            obj.append(c2.cost * p2)
 
             for i in c1.images:
                 dual = sum(self.img_cmd_duals[i, cmd] for cmd in c1.commands)
-                obj.append(dual * q1[i])
+                obj.append(-dual * q1[i])
 
             for i in c2.images:
                 dual = sum(self.img_cmd_duals[i, cmd] for cmd in c2.commands)
-                obj.append(dual * q2[i])
+                obj.append(-dual * q2[i])
 
             for i in int_images:
                 model.addConstr(p1 <= r1[i] + r2[i])
@@ -211,8 +211,11 @@ class ColgenModelGurobi(object):
                 if i in int_images:
                     model.addConstr(q2[i] <= 1 - r2[i])
 
-            model.setObjective(sum(obj), GRB.MAXIMIZE)
+            model.setObjective(sum(obj), GRB.MINIMIZE)
             model.optimize()
+
+            if model.objVal >= 0:
+                continue
 
             for c, v, r in [(c1, p1, r1), (c2, p2, r2)]:
                 if v.x < 0.5:
