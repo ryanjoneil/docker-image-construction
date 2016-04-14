@@ -39,6 +39,11 @@ class ColgenModelGurobi(object):
                 self.img_cmd_to_cliques[img, cmd].append(clique)
                 self.img_to_cliques[img].append(clique)
 
+        # Initial set of intersections
+        self.intersections = set()
+        for c1, c2 in combinations(self.cliques, 2):
+            self._test_intersection(c1, c2)
+
         for iteration in range(1000):
             print '[iteration %02d / %s]' % (iteration + 1, time.asctime())
 
@@ -47,6 +52,9 @@ class ColgenModelGurobi(object):
             for clique in self._subproblem():
                 if clique is not None and clique not in self.cliques:
                     print '[new clique] %s' % clique
+
+                    for c in self.cliques:
+                        self._test_intersection(clique, c)
 
                     done = False
                     self.cliques.add(clique)
@@ -69,6 +77,21 @@ class ColgenModelGurobi(object):
                         print clique
                 break
             print
+
+    def _test_intersection(self, c1, c2):
+        c1, c2 = tuple(sorted([c1, c2]))
+        if (c1, c2) in self.intersections:
+            return
+
+        overlapping_images = bool(c1.images_set.intersection(c2.images_set))
+        if not overlapping_images:
+            return
+
+        disjoint_images = bool(c1.images_set - c2.images_set and c2.images_set - c1.images_set)
+        overlapping_commands = bool(c1.commands_set.intersection(c2.commands_set))
+
+        if disjoint_images or (overlapping_images and overlapping_commands):
+            self.intersections.add((c1, c2))
 
     def _master(self, final=False):
         self.img_cmd_duals = defaultdict(float)
@@ -101,18 +124,8 @@ class ColgenModelGurobi(object):
 
         # Clique intersections
         clique_inter_constraints = {}
-        for cliques in self.img_to_cliques.values():
-            for c1, c2 in combinations(cliques, 2):
-                c1, c2 = tuple(sorted([c1, c2]))
-                if (c1, c2) in clique_inter_constraints:
-                    continue
-
-                disjoint_images = bool(c1.images_set - c2.images_set and c2.images_set - c1.images_set)
-                overlapping_images = bool(c1.images_set.intersection(c2.images_set))
-                overlapping_commands = bool(c1.commands_set.intersection(c2.commands_set))
-
-                if disjoint_images or (overlapping_images and overlapping_commands):
-                    clique_inter_constraints[c1, c2] = model.addConstr(x[c1] + x[c2] <= 1)
+        for c1, c2 in self.intersections:
+            clique_inter_constraints[c1, c2] = model.addConstr(x[c1] + x[c2] <= 1)
 
         model.setObjective(quicksum(obj), GRB.MINIMIZE)
         model.optimize()
